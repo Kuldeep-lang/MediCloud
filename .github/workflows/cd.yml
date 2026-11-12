@@ -1,0 +1,146 @@
+# Continuous delivery to Amazon EKS. Runs after CI succeeds on main (or by hand).
+#
+# Gates (nothing deploys by accident, and nothing deploys while the cluster is down):
+#   1. repository variable DEPLOY_ENABLED must be 'true'
+#   2. the 'production' GitHub Environment (add yourself as a required reviewer)
+#
+# AWS access uses GitHub OIDC: the job assumes the Terraform-created role
+# (secret AWS_ROLE_ARN) with short-lived credentials. No AWS keys are stored in GitHub.
+# That role can push to the two ECR repositories and edit the 'medicloud' namespace only,
+# so CD delivers the application; one-time cluster setup (namespace, Secret from Secrets
+# Manager, ingress controller) is done by Ansible: ansible/run.sh playbook.yml --tags k8s
+name: CD
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for AWS
+
+concurrency:
+  group: cd-production
+  cancel-in-progress: false
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c
+
+jobs:
+  deploy:
+    name: Build, push and deploy to EKS
+    if: >-
+      vars.DEPLOY_ENABLED == 'true' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment:
+      name: production
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'ap-southeast-2' }}
+      CLUSTER: ${{ vars.EKS_CLUSTER_NAME || 'medicloud' }}
+      COMMIT: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.COMMIT }}
+          persist-credentials: false
+
+      - name: Image tag = short commit SHA (ECR tags are immutable)
+        run: echo "TAG=${COMMIT:0:12}" >> "$GITHUB_ENV"
+
+      - uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build backend (reuses CI's layer cache)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: backend
+          load: true
+          tags: ${{ steps.ecr.outputs.registry }}/medicloud-backend:${{ env.TAG }}
+          build-args: GIT_COMMIT=${{ env.TAG }}
+          cache-from: type=gha,scope=backend
+
+      - name: Build frontend (reuses CI's layer cache)
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: frontend
+          load: true
+          tags: ${{ steps.ecr.outputs.registry }}/medicloud-frontend:${{ env.TAG }}
+          build-args: GIT_COMMIT=${{ env.TAG }}
+          cache-from: type=gha,scope=frontend
+
+      - name: Scan, then push (only images that pass the scan reach ECR)
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          for app in backend frontend; do
+            img="$REGISTRY/medicloud-$app:$TAG"
+            docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
+              --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress "$img"
+            docker push "$img"
+          done
+
+      - name: Connect kubectl to the cluster
+        run: aws eks update-kubeconfig --region "$AWS_REGION" --name "$CLUSTER"
+
+      - name: Check the cluster was bootstrapped by Ansible
+        run: |
+          kubectl get secret medicloud-secrets -n medicloud >/dev/null \
+            || { echo "::error::Run 'ansible/run.sh playbook.yml --tags k8s' once after terraform apply"; exit 1; }
+
+      - name: Render the EKS overlay and apply
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          # Environment-specific values come from what Ansible configured in the cluster.
+          RDS_ENDPOINT=$(kubectl get configmap medicloud-config -n medicloud -o jsonpath='{.data.POSTGRES_HOST}')
+          INGRESS_HOST=$(kubectl get ingress medicloud -n medicloud -o jsonpath='{.spec.rules[0].host}')
+          ACCOUNT_ID="${REGISTRY%%.*}"
+          kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/eks \
+            | sed -e "s|ACCOUNT_ID|${ACCOUNT_ID}|g" -e "s|IMAGE_TAG|${TAG}|g" \
+                  -e "s|RDS_ENDPOINT|${RDS_ENDPOINT}|g" -e "s|INGRESS_HOST|${INGRESS_HOST}|g" \
+            | kubectl apply -f -
+
+      - name: Wait for the rollout (zero downtime - maxUnavailable 0)
+        run: |
+          kubectl rollout status deployment/backend -n medicloud --timeout=600s
+          kubectl rollout status deployment/frontend -n medicloud --timeout=300s
+
+      - name: Smoke test the new version
+        run: |
+          kubectl port-forward -n medicloud svc/frontend 18080:8080 >/dev/null 2>&1 &
+          trap 'kill $!' EXIT
+          for _ in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:18080/api/v1/system/info && break
+            sleep 3
+          done
+          curl -fsS http://127.0.0.1:18080/healthz >/dev/null
+          running=$(kubectl get deployment backend -n medicloud -o jsonpath='{.spec.template.spec.containers[0].image}')
+          echo "backend image: $running"
+          [[ "$running" == *":$TAG" ]]
+
+      - name: Roll back on failure
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/backend -n medicloud || true
+          kubectl rollout undo deployment/frontend -n medicloud || true
+          echo "::error::Deployment of $TAG failed and was rolled back."
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Deployed \`$TAG\` to EKS cluster \`$CLUSTER\`"
+            kubectl get deploy -n medicloud -o wide
+          } >> "$GITHUB_STEP_SUMMARY"

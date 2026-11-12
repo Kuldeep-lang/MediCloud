@@ -1,0 +1,197 @@
+# Continuous integration: runs on every push to main and every pull request.
+#   backend   ruff + pytest against a real PostgreSQL 17 service container
+#   frontend  eslint + vitest + production build
+#   iac       terraform fmt/validate/test + tflint, kubeconform, ansible-lint,
+#             shellcheck, trivy config
+#   secrets   gitleaks over the full history
+#   images    build both images (cached) and fail on fixable HIGH/CRITICAL CVEs (Trivy)
+#
+# Supply-chain hygiene: every third-party action is pinned to a full commit SHA, and Trivy
+# runs from an image pinned by digest (CVE-2026-33634: compromised trivy releases/actions).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.69.3@sha256:bcc376de8d77cfe086a917230e818dc9f8528e3c852f7b1aff648949b6258d1c
+
+jobs:
+  backend:
+    name: Backend (ruff, pytest)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: medicloud
+          POSTGRES_PASSWORD: ci-only-password # throwaway service container, not a secret
+          POSTGRES_DB: medicloud_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U medicloud -d medicloud_test"
+          --health-interval 5s --health-timeout 3s --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://medicloud:ci-only-password@127.0.0.1:5432/medicloud_test
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: backend/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Lint (ruff)
+        run: ruff check app tests
+      - name: Test (pytest, real PostgreSQL, migrations included)
+        run: pytest --cov=app --cov-report=term-missing:skip-covered --cov-fail-under=85
+
+  frontend:
+    name: Frontend (eslint, vitest, build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  iac:
+    name: Infrastructure as code
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - name: Terraform fmt, validate and module tests (mock provider, no AWS)
+        working-directory: terraform
+        run: |
+          terraform fmt -check -recursive
+          terraform init -backend=false -input=false
+          terraform validate
+          terraform -chdir=bootstrap init -backend=false -input=false
+          terraform -chdir=bootstrap validate
+          for m in modules/*/; do
+            echo "::group::terraform test $m"
+            terraform -chdir="$m" init -input=false
+            terraform -chdir="$m" test
+            echo "::endgroup::"
+          done
+
+      - uses: terraform-linters/setup-tflint@6ffdbaa3be476b3431f7275c26966ef32ff60337 # v6.3.2
+        with:
+          tflint_version: v0.65.0
+      - name: TFLint (AWS ruleset)
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ github.token }} # avoids rate limits when downloading the plugin
+        run: |
+          tflint --init
+          tflint --recursive --config "$PWD/.tflint.hcl"
+
+      - name: Kubernetes manifests (kubeconform, incl. the rendered EKS overlay)
+        run: |
+          curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar -xz kubeconform
+          ./kubeconform -strict -summary -ignore-missing-schemas k8s/*.yaml k8s/tools/*.yaml
+          kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/eks \
+            | ./kubeconform -strict -summary -ignore-missing-schemas
+
+      - name: Ansible (syntax check + ansible-lint, production profile)
+        run: |
+          docker build -q -t medicloud-ansible:ci ansible/
+          docker run --rm -v "$PWD:/work" \
+            -e ANSIBLE_INVENTORY=localhost, \
+            -e ANSIBLE_VAULT_PASSWORD_FILE=/tmp/vault_pass \
+            medicloud-ansible:ci \
+            bash -euc 'echo ci > /tmp/vault_pass; ansible-playbook playbook.yml --syntax-check; ansible-lint'
+
+      - name: Shell scripts (shellcheck)
+        run: shellcheck scripts/*.sh ansible/run.sh
+
+      - name: Misconfiguration scan (Trivy config, Terraform + Dockerfiles)
+        run: |
+          docker run --rm -v "$PWD:/src:ro" "$TRIVY_IMAGE" config --quiet \
+            --severity HIGH,CRITICAL --exit-code 1 /src/terraform
+          for f in backend/Dockerfile frontend/Dockerfile ansible/Dockerfile; do
+            docker run --rm -v "$PWD:/src:ro" "$TRIVY_IMAGE" config --quiet \
+              --severity HIGH,CRITICAL --exit-code 1 "/src/$f"
+          done
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan the full git history
+        run: |
+          docker run --rm -v "$PWD:/repo" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            zricethezav/gitleaks:v8.24.3@sha256:e1b35e12a8c6fa8901f060459cfb6b2fc4c484d3afbe3b029733a3bbfab07055 \
+            git --redact --no-banner /repo
+
+  images:
+    name: Images (build + Trivy CVE scan)
+    needs: [backend, frontend]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [backend, frontend]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Build medicloud-${{ matrix.app }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ matrix.app }}
+          load: true
+          tags: medicloud-${{ matrix.app }}:ci
+          build-args: |
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.app }}
+      - name: Trivy - fail on fixable HIGH/CRITICAL vulnerabilities
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock "$TRIVY_IMAGE" image \
+            --severity HIGH,CRITICAL --ignore-unfixed --exit-code 1 --no-progress \
+            medicloud-${{ matrix.app }}:ci
