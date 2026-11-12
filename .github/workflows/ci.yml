@@ -138,8 +138,12 @@ jobs:
             medicloud-ansible:ci \
             bash -euc 'echo ci > /tmp/vault_pass; ansible-playbook playbook.yml --syntax-check; ansible-lint'
 
-      - name: Shell scripts (shellcheck)
-        run: shellcheck scripts/*.sh ansible/run.sh
+      # Pinned image instead of the runner's shellcheck, so CI and local runs agree.
+      - name: Shell scripts (shellcheck 0.11.0)
+        run: |
+          docker run --rm -v "$PWD:/mnt:ro" -w /mnt \
+            koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d \
+            scripts/aws-leftovers.sh scripts/aws-teardown.sh scripts/eks-deploy.sh scripts/app-host-access.sh ansible/run.sh
 
       - name: Misconfiguration scan (Trivy config, Terraform + Dockerfiles)
         run: |

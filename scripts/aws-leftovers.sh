@@ -13,7 +13,9 @@ check() { # check "<label>" <aws cli args...>   (prints the result if non-empty)
   local out
   out=$(aws "$@" --region "$REGION" --output text 2>/dev/null | sed '/^None$/d;/^$/d')
   if [ -n "$out" ]; then
-    echo "  [!] ${label}:"; echo "$out" | sed 's/^/        /'; found=1
+    echo "  [!] ${label}:"
+    while IFS= read -r line; do echo "        $line"; done <<<"$out"
+    found=1
   else
     echo "  [ok] ${label}: none"
   fi
@@ -21,6 +23,7 @@ check() { # check "<label>" <aws cli args...>   (prints the result if non-empty)
 
 echo "Billable leftovers in ${REGION}:"
 check "EKS clusters"            eks list-clusters --query 'clusters[]'
+# shellcheck disable=SC2016  # backticks are a JMESPath literal for the AWS CLI, not shell
 check "Running EC2 instances"   ec2 describe-instances --filters Name=instance-state-name,Values=pending,running,stopping,stopped --query 'Reservations[].Instances[].[InstanceId,InstanceType,Tags[?Key==`Name`]|[0].Value]'
 check "NAT gateways"            ec2 describe-nat-gateways --filter Name=state,Values=pending,available --query 'NatGateways[].[NatGatewayId,VpcId]'
 check "Load balancers (v2)"     elbv2 describe-load-balancers --query 'LoadBalancers[].[LoadBalancerName,Type,State.Code]'
@@ -31,7 +34,8 @@ check "Elastic IPs"             ec2 describe-addresses --query 'Addresses[].[Pub
 check "Unattached EBS volumes"  ec2 describe-volumes --filters Name=status,Values=available --query 'Volumes[].[VolumeId,Size]'
 
 echo
-echo "Resources still tagged Project=medicloud (may include free items such as IAM/ECR):"
+echo "Resources still tagged Project=medicloud (may include free items such as IAM/ECR;"
+echo "AWS's tagging index can also list resources deleted in the last hour or so):"
 aws resourcegroupstaggingapi get-resources --region "$REGION" \
   --tag-filters Key=Project,Values=medicloud --query 'ResourceTagMappingList[].ResourceARN' \
   --output text 2>/dev/null | tr '\t' '\n' | sed '/^$/d;s/^/        /' || true
