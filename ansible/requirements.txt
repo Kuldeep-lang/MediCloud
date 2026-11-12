@@ -1,0 +1,7 @@
+# Python packages for the Ansible control node (ansible/Dockerfile).
+# boto3 is for the amazon.aws inventory and modules; kubernetes is for kubernetes.core.
+# kubernetes 37.0.2 conflicts with boto3 1.44.1 (urllib3), so 37.0.1 is pinned.
+ansible-core==2.21.6
+ansible-lint==26.10.1
+boto3==1.44.1
+kubernetes==37.0.1

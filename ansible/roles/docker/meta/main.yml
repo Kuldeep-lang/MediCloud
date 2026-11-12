@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: MediCloud
+  description: Docker Engine + Compose plugin from Docker's signed apt repository, ECR credential helper
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+dependencies: []

@@ -1,0 +1,12 @@
+---
+collections:
+  - name: amazon.aws # EC2 dynamic inventory, caller identity, Secrets Manager lookup
+    version: 12.1.0
+  - name: ansible.posix # profile_tasks callback (task timings)
+    version: 2.2.2
+  - name: community.docker # docker_compose_v2
+    version: 5.4.0
+  - name: community.general # timezone
+    version: 14.0.1
+  - name: kubernetes.core # k8s, k8s_info
+    version: 6.6.0

@@ -1,0 +1,75 @@
+---
+- name: Add Docker's official apt repository (signed)
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: deb
+    uris: https://download.docker.com/linux/ubuntu
+    suites: "{{ ansible_facts['distribution_release'] }}"
+    components: stable
+    architectures: amd64
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+  register: docker_repo
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: "{{ docker_repo is changed }}"
+
+- name: Configure the Docker daemon (log rotation, live restore)
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Docker
+
+- name: Start Docker now and on boot
+  block:
+    - name: Start the Docker socket, then the daemon
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop: [docker.socket, docker.service]
+  rescue:
+    # docker-ce's package scripts can reload docker.socket while it is running, leaving it
+    # with no listening fd; dockerd then fails with "no sockets found via socket activation"
+    # until systemd's start limit trips. Seen on the first run against Ubuntu 24.04.
+    - name: Clear the failed state of the Docker units
+      ansible.builtin.command: systemctl reset-failed docker.socket docker.service # noqa: command-instead-of-module (no module option for reset-failed)
+      changed_when: true
+
+    - name: Re-create the socket, then start the daemon
+      ansible.builtin.systemd_service:
+        name: "{{ item.name }}"
+        state: "{{ item.state }}"
+        enabled: true
+      loop:
+        - { name: docker.socket, state: restarted }
+        - { name: docker.service, state: started }
+
+- name: Create root's Docker client directory
+  ansible.builtin.file:
+    path: /root/.docker
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Pull from ECR through the instance role (no stored registry password)
+  ansible.builtin.copy:
+    dest: /root/.docker/config.json
+    content: "{{ {'credHelpers': {ecr_registry: 'ecr-login'}} | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Apply a changed daemon configuration before deploying
+  ansible.builtin.meta: flush_handlers

@@ -1,0 +1,13 @@
+---
+- name: Start or update the MediCloud stack (waits until every service is healthy)
+  community.docker.docker_compose_v2:
+    project_src: "{{ medicloud_dir }}"
+    state: present
+    pull: missing # tags are immutable, so an existing image never needs re-pulling
+    wait: true
+    wait_timeout: 420
+  register: app_deploy_compose
+
+- name: Show what Compose did
+  ansible.builtin.debug:
+    msg: "{{ app_deploy_compose.actions | default([]) | map(attribute='what') | list | unique or 'nothing to change' }}"

@@ -1,0 +1,91 @@
+---
+# MediCloud configuration management.
+#
+#   ansible/run.sh playbook.yml --tags host   configure the EC2 VM and deploy the Compose stack
+#   ansible/run.sh playbook.yml --tags k8s    deploy the app to the EKS cluster
+#   ansible/run.sh playbook.yml               both
+#
+# Both targets pull the same immutable images from Amazon ECR.
+
+- name: Resolve deployment facts (AWS account, registry, image tag)
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [always]
+  tasks:
+    - name: Look up the AWS account
+      amazon.aws.aws_caller_info:
+      register: caller
+
+    - name: Find the most recently pushed backend image tag
+      ansible.builtin.command:
+        argv:
+          - aws
+          - ecr
+          - describe-images
+          - --region={{ aws_region }}
+          - --repository-name=medicloud-backend
+          - --query=sort_by(imageDetails[?imageTags], &imagePushedAt)[-1].imageTags[0]
+          - --output=text
+      register: newest_tag
+      changed_when: false
+      when: image_tag is not defined
+
+    - name: Record the registry and image tag for the other plays
+      ansible.builtin.set_fact:
+        ecr_registry: "{{ caller.account }}.dkr.ecr.{{ aws_region }}.amazonaws.com"
+        deploy_image_tag: "{{ image_tag | default(newest_tag.stdout | trim) }}"
+
+    - name: Fail early if there is no image to deploy
+      ansible.builtin.assert:
+        that: deploy_image_tag not in ['', 'None']
+        fail_msg: "No image in ECR yet. Push one first (scripts/eks-deploy.sh or the CD pipeline)."
+        quiet: true
+
+- name: Configure the MediCloud app server (Ubuntu 24.04 on EC2)
+  hosts: app_servers
+  become: true
+  tags: [host]
+  vars:
+    ecr_registry: "{{ hostvars['localhost']['ecr_registry'] }}"
+    deploy_image_tag: "{{ hostvars['localhost']['deploy_image_tag'] }}"
+  roles:
+    - role: common
+    - role: docker
+    - role: monitoring_agent
+    - role: app_config
+    - role: app_deploy
+  post_tasks:
+    - name: Check the app from outside, through the security group
+      ansible.builtin.include_role:
+        name: healthcheck
+        apply:
+          delegate_to: localhost
+          become: false
+      vars:
+        healthcheck_base_url: "http://{{ ansible_host }}"
+
+    - name: Check node_exporter on the host
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ node_exporter_port }}/metrics"
+        return_content: true
+      register: node_metrics
+      failed_when: "'node_exporter_build_info' not in node_metrics.content"
+      changed_when: false
+
+- name: Deploy MediCloud to Amazon EKS
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tags: [k8s]
+  roles:
+    - role: k8s_deploy
+    - role: monitoring_stack
+      tags: [monitoring]
+  post_tasks:
+    - name: Check the app through the ingress (AWS NLB, or a tunnel without one)
+      ansible.builtin.include_role:
+        name: healthcheck
+      vars:
+        healthcheck_base_url: "{{ k8s_deploy_check_url }}"
+        healthcheck_host_header: "{{ k8s_deploy_ingress_hostname }}"

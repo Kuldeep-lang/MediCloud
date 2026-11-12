@@ -1,0 +1,22 @@
+---
+# Dynamic inventory: asks EC2 which MediCloud app servers are running right now, so no IP
+# addresses are hard-coded (hosts are recreated every session). Terraform tags the VM with
+# Role=app-server.
+#   ansible-inventory --graph
+plugin: amazon.aws.aws_ec2
+regions:
+  - ap-southeast-2
+filters:
+  tag:Project: medicloud
+  tag:Role: app-server
+  instance-state-name: running
+# Expose tags only as `ec2_tags` (the plain `tags` variable is deprecated and collides
+# with Ansible's reserved `tags` keyword).
+use_deprecated_tags: false
+hostnames:
+  - tag:Name
+compose:
+  ansible_host: public_ip_address
+  private_ip: private_ip_address
+groups:
+  app_servers: true

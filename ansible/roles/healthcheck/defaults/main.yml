@@ -1,0 +1,8 @@
+---
+healthcheck_base_url: http://localhost
+# Host header to send (the Ingress routes by host); empty = derived from the URL.
+healthcheck_host_header: ""
+healthcheck_retries: 30
+healthcheck_delay: 10
+healthcheck_password: "{{ seed_demo_password | default(k8s_deploy_seed_demo_password) }}"
+healthcheck_headers: "{{ {'Host': healthcheck_host_header} if healthcheck_host_header else {} }}"

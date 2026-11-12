@@ -1,0 +1,13 @@
+---
+k8s_deploy_cluster_name: "{{ project_name }}"
+k8s_deploy_rds_instance_id: "{{ project_name }}-postgres"
+k8s_deploy_dir: "{{ repo_root }}/k8s"
+k8s_deploy_namespace: medicloud
+k8s_deploy_kubeconfig: /tmp/medicloud-kubeconfig
+# Used only when the Secret is first created; afterwards the stored value is kept.
+k8s_deploy_seed_demo_password: "{{ lookup('ansible.builtin.env', 'SEED_DEMO_PASSWORD') | default('Demo@12345', true) }}"
+k8s_deploy_rollout_timeout: 600
+# nlb: public AWS Network Load Balancer. port-forward: no load balancer (for AWS accounts
+# not yet allowed to create one); the app is reached through kubectl port-forward.
+k8s_deploy_ingress_mode: "{{ lookup('ansible.builtin.env', 'INGRESS_MODE') | default('nlb', true) }}"
+k8s_deploy_local_hostname: medicloud.localhost

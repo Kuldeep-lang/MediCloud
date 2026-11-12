@@ -1,0 +1,10 @@
+---
+galaxy_info:
+  author: MediCloud
+  description: Prometheus node_exporter as a sandboxed systemd service (checksum-verified download)
+  license: MIT
+  min_ansible_version: "2.17"
+  platforms:
+    - name: Ubuntu
+      versions: [noble]
+dependencies: []

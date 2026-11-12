@@ -1,0 +1,6 @@
+---
+# ansible-lint configuration (run with: ansible/run.sh lint)
+profile: production
+exclude_paths:
+  - inventory/
+  - group_vars/app_servers/vault.yml

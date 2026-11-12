@@ -1,0 +1,127 @@
+---
+# Deploys MediCloud to EKS. This orchestrates Kubernetes (namespace, Secret, ingress
+# controller, manifests, rollout); Kubernetes itself manages the containers.
+
+- name: Look up the RDS instance (endpoint and managed master-password secret)
+  amazon.aws.rds_instance_info:
+    db_instance_identifier: "{{ k8s_deploy_rds_instance_id }}"
+    region: "{{ aws_region }}"
+  register: k8s_deploy_rds
+
+- name: Record the database endpoint
+  ansible.builtin.set_fact:
+    k8s_deploy_rds_endpoint: "{{ k8s_deploy_rds.instances[0].endpoint.address }}"
+    k8s_deploy_rds_secret_arn: "{{ k8s_deploy_rds.instances[0].master_user_secret.secret_arn }}"
+
+- name: Write a kubeconfig for the cluster (tokens come from the AWS credentials)
+  ansible.builtin.command:
+    argv: [aws, eks, update-kubeconfig, --region, "{{ aws_region }}", --name, "{{ k8s_deploy_cluster_name }}", --kubeconfig, "{{ k8s_deploy_kubeconfig }}"]
+  changed_when: false
+
+- name: Apply the cluster resources
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ k8s_deploy_kubeconfig }}"
+  block:
+    - name: Namespace with Pod Security "restricted"
+      kubernetes.core.k8s:
+        src: "{{ k8s_deploy_dir }}/00-namespace.yaml"
+        state: present
+        apply: true
+
+    - name: Render the ingress controller (pinned F5 NGINX v5.7.0; NLB or NodePort)
+      ansible.builtin.command:
+        argv: [kubectl, kustomize, "{{ k8s_deploy_dir }}/ingress-controller{{ '/eks' if k8s_deploy_ingress_mode == 'nlb' else '' }}"]
+      register: k8s_deploy_ingress_rendered
+      changed_when: false
+
+    - name: Install or update the ingress controller
+      kubernetes.core.k8s:
+        definition: "{{ k8s_deploy_ingress_rendered.stdout | ansible.builtin.from_yaml_all | list }}"
+        state: present
+        apply: true
+
+    - name: Wait for AWS to assign the load balancer hostname
+      when: k8s_deploy_ingress_mode == 'nlb'
+      kubernetes.core.k8s_info:
+        kind: Service
+        name: nginx-ingress
+        namespace: nginx-ingress
+      register: k8s_deploy_ingress_svc
+      until: k8s_deploy_ingress_svc.resources[0].status.loadBalancer.ingress[0].hostname is defined
+      retries: 60
+      delay: 5
+
+    - name: Record the hostname the Ingress answers to
+      ansible.builtin.set_fact:
+        k8s_deploy_ingress_hostname: >-
+          {{ k8s_deploy_ingress_svc.resources[0].status.loadBalancer.ingress[0].hostname
+             if k8s_deploy_ingress_mode == 'nlb' else k8s_deploy_local_hostname }}
+
+    - name: Check for an existing application Secret
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: medicloud-secrets
+        namespace: "{{ k8s_deploy_namespace }}"
+      register: k8s_deploy_secret
+      no_log: true
+
+    - name: Create the Secret from AWS Secrets Manager (first deploy only)
+      when: k8s_deploy_secret.resources | length == 0
+      vars:
+        k8s_deploy_db: "{{ lookup('amazon.aws.secretsmanager_secret', k8s_deploy_rds_secret_arn, region=aws_region) | from_json }}"
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: medicloud-secrets
+            namespace: "{{ k8s_deploy_namespace }}"
+          type: Opaque
+          stringData:
+            POSTGRES_USER: "{{ k8s_deploy_db.username }}"
+            POSTGRES_PASSWORD: "{{ k8s_deploy_db.password }}"
+            JWT_SECRET_KEY: "{{ lookup('ansible.builtin.password', '/dev/null', length=64, chars=['ascii_letters', 'digits']) }}"
+            SEED_DEMO_PASSWORD: "{{ k8s_deploy_seed_demo_password }}"
+      no_log: true
+
+    - name: Keep the demo password already stored in the Secret
+      when: k8s_deploy_secret.resources | length > 0
+      ansible.builtin.set_fact:
+        k8s_deploy_seed_demo_password: "{{ k8s_deploy_secret.resources[0].data.SEED_DEMO_PASSWORD | b64decode }}"
+      no_log: true
+
+    - name: Render the EKS overlay
+      ansible.builtin.command:
+        argv: [kubectl, kustomize, --load-restrictor, LoadRestrictionsNone, "{{ k8s_deploy_dir }}/overlays/eks"]
+      register: k8s_deploy_app_rendered
+      changed_when: false
+
+    - name: Deploy the app and wait for every rollout to finish
+      kubernetes.core.k8s:
+        definition: >-
+          {{ k8s_deploy_app_rendered.stdout
+             | replace('ACCOUNT_ID', ecr_registry.split('.')[0])
+             | replace('IMAGE_TAG', deploy_image_tag)
+             | replace('RDS_ENDPOINT', k8s_deploy_rds_endpoint)
+             | replace('INGRESS_HOST', k8s_deploy_ingress_hostname)
+             | ansible.builtin.from_yaml_all | list }}
+        state: present
+        apply: true
+        wait: true
+        wait_timeout: "{{ k8s_deploy_rollout_timeout }}"
+
+# Without a load balancer, the health check goes through a short-lived tunnel over the
+# (IAM-authenticated) Kubernetes API, the same way an operator reaches the app.
+- name: Open a temporary tunnel to the ingress controller (port-forward mode)
+  when: k8s_deploy_ingress_mode != 'nlb'
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, "{{ k8s_deploy_kubeconfig }}", port-forward, -n, nginx-ingress, svc/nginx-ingress, "18081:80"]
+  async: 1200
+  poll: 0
+  changed_when: false
+
+- name: Record where the app can be checked from here
+  ansible.builtin.set_fact:
+    k8s_deploy_check_url: "{{ 'http://' ~ k8s_deploy_ingress_hostname if k8s_deploy_ingress_mode == 'nlb' else 'http://127.0.0.1:18081' }}"

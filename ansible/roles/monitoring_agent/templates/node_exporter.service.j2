@@ -1,0 +1,26 @@
+# Managed by Ansible (role: monitoring_agent). Local edits will be overwritten.
+[Unit]
+Description=Prometheus node_exporter (host metrics)
+Documentation=https://github.com/prometheus/node_exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=node_exporter
+Group=node_exporter
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=:{{ node_exporter_port }}
+Restart=on-failure
+# Sandboxing: read-only view of the system, no privilege escalation.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

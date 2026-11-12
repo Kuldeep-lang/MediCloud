@@ -1,0 +1,55 @@
+---
+- name: Refresh the apt cache
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Apply pending security and bug-fix updates
+  ansible.builtin.apt:
+    upgrade: safe
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - python3-yaml # needed by community.docker.docker_compose_v2
+      - amazon-ecr-credential-helper # docker pulls from ECR with the instance role
+      - unattended-upgrades
+    state: present
+
+- name: Check whether an update needs a reboot
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: common_reboot_required
+
+- name: Reboot to load the updated kernel
+  ansible.builtin.reboot:
+    reboot_timeout: 600
+  when: common_reboot_required.stat.exists
+
+- name: Set the hospital's timezone
+  community.general.timezone:
+    name: "{{ host_timezone }}"
+
+- name: Create the application group
+  ansible.builtin.group:
+    name: "{{ medicloud_user }}"
+    system: true
+
+- name: Create the application user (no login shell)
+  ansible.builtin.user:
+    name: "{{ medicloud_user }}"
+    group: "{{ medicloud_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Create the application directory
+  ansible.builtin.file:
+    path: "{{ medicloud_dir }}"
+    state: directory
+    owner: root
+    group: "{{ medicloud_user }}"
+    mode: "0750"

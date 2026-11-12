@@ -1,0 +1,7 @@
+---
+monitoring_stack_namespace: medicloud-monitoring
+monitoring_stack_dir: "{{ repo_root }}/monitoring/k8s"
+monitoring_stack_kubeconfig: /tmp/medicloud-kubeconfig
+monitoring_stack_rollout_timeout: 420
+# Expected minimum number of loaded rules (recording + alerting) in medicloud.rules.yml.
+monitoring_stack_min_rules: 9

@@ -1,0 +1,113 @@
+---
+# Prometheus + kube-state-metrics + Grafana on EKS, wired to the EC2 app server.
+
+- name: Write a kubeconfig for the cluster
+  ansible.builtin.command:
+    argv: [aws, eks, update-kubeconfig, --region, "{{ aws_region }}", --name, "{{ project_name }}", --kubeconfig, "{{ monitoring_stack_kubeconfig }}"]
+  changed_when: false
+
+- name: Apply the monitoring stack
+  module_defaults:
+    group/kubernetes.core.k8s:
+      kubeconfig: "{{ monitoring_stack_kubeconfig }}"
+  block:
+    - name: Monitoring namespace (Pod Security "restricted")
+      kubernetes.core.k8s:
+        src: "{{ monitoring_stack_dir }}/00-namespace.yaml"
+        state: present
+        apply: true
+
+    - name: Check for the Grafana admin Secret
+      kubernetes.core.k8s_info:
+        kind: Secret
+        name: grafana-admin
+        namespace: "{{ monitoring_stack_namespace }}"
+      register: monitoring_stack_grafana_secret
+      no_log: true
+
+    - name: Create the Grafana admin Secret with a random password (first deploy only)
+      when: monitoring_stack_grafana_secret.resources | length == 0
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: grafana-admin
+            namespace: "{{ monitoring_stack_namespace }}"
+          type: Opaque
+          stringData:
+            admin-user: admin
+            admin-password: "{{ lookup('ansible.builtin.password', '/dev/null', length=24, chars=['ascii_letters', 'digits']) }}"
+      no_log: true
+
+    - name: Point Prometheus at the EC2 app server's node_exporter (private IP)
+      vars:
+        monitoring_stack_targets: >-
+          {{ groups.get('app_servers', [])
+             | map('extract', hostvars, 'private_ip')
+             | select('defined') | map('regex_replace', '$', ':9100') | list }}
+      kubernetes.core.k8s:
+        state: present
+        apply: true
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: prometheus-file-sd
+            namespace: "{{ monitoring_stack_namespace }}"
+          data:
+            app-host.json: >-
+              {{ ([{'targets': monitoring_stack_targets, 'labels': {'instance': 'medicloud-app-host'}}]
+                  if monitoring_stack_targets else []) | to_json }}
+
+    - name: Render the monitoring manifests
+      ansible.builtin.command:
+        argv: [kubectl, kustomize, --load-restrictor, LoadRestrictionsNone, "{{ monitoring_stack_dir }}"]
+      register: monitoring_stack_rendered
+      changed_when: false
+
+    - name: Deploy Prometheus, kube-state-metrics and Grafana and wait for them
+      kubernetes.core.k8s:
+        definition: "{{ monitoring_stack_rendered.stdout | ansible.builtin.from_yaml_all | list }}"
+        state: present
+        apply: true
+        wait: true
+        wait_timeout: "{{ monitoring_stack_rollout_timeout }}"
+
+# Verify through a short-lived tunnel to the Prometheus API.
+- name: Open a temporary tunnel to Prometheus
+  ansible.builtin.command:
+    argv: [kubectl, --kubeconfig, "{{ monitoring_stack_kubeconfig }}", port-forward, -n, "{{ monitoring_stack_namespace }}", svc/prometheus, "19090:9090"]
+  async: 300
+  poll: 0
+  changed_when: false
+
+- name: Every scrape target is up
+  ansible.builtin.uri:
+    url: http://127.0.0.1:19090/api/v1/targets?state=active
+    return_content: true
+  register: monitoring_stack_targets_status
+  until: >-
+    monitoring_stack_targets_status.status == 200
+    and (monitoring_stack_targets_status.json.data.activeTargets | length) > 0
+    and (monitoring_stack_targets_status.json.data.activeTargets | rejectattr('health', 'eq', 'up') | list | length) == 0
+  retries: 18
+  delay: 10
+
+- name: The alert and recording rules are loaded
+  ansible.builtin.uri:
+    url: http://127.0.0.1:19090/api/v1/rules
+    return_content: true
+  register: monitoring_stack_rules
+  failed_when: >-
+    (monitoring_stack_rules.json.data.groups | map(attribute='rules') | flatten | length)
+    < monitoring_stack_min_rules
+
+- name: Summarise the monitoring state
+  ansible.builtin.debug:
+    msg:
+      - "Targets up: {{ monitoring_stack_targets_status.json.data.activeTargets | map(attribute='labels.job') | list | community.general.counter }}"
+      - "Rules loaded: {{ monitoring_stack_rules.json.data.groups | map(attribute='rules') | flatten | length }}"
+      - "Grafana: kubectl port-forward -n {{ monitoring_stack_namespace }} svc/grafana 3000:3000  ->  http://localhost:3000 (user admin)"
+      - "Password: kubectl get secret grafana-admin -n {{ monitoring_stack_namespace }} -o jsonpath='{.data.admin-password}' | base64 -d"

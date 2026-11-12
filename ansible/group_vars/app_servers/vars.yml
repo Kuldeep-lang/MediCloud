@@ -1,0 +1,17 @@
+---
+# The single-VM deployment (Docker Compose on Ubuntu 24.04).
+host_timezone: Asia/Kolkata
+medicloud_user: medicloud
+medicloud_dir: /opt/medicloud
+medicloud_http_port: 80
+
+docker_log_max_size: 10m
+docker_log_max_file: "3"
+
+node_exporter_version: 1.12.1
+node_exporter_port: 9100
+
+# Secrets come from the encrypted vault file (group_vars/app_servers/vault.yml).
+postgres_password: "{{ vault_postgres_password }}"
+jwt_secret_key: "{{ vault_jwt_secret_key }}"
+seed_demo_password: "{{ vault_seed_demo_password }}"

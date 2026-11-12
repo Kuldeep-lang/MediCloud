@@ -1,0 +1,6 @@
+---
+# Template for group_vars/app_servers/vault.yml (git-ignored, ansible-vault encrypted).
+# ansible/run.sh init  generates random values and encrypts the real file for you.
+vault_postgres_password: change-me
+vault_jwt_secret_key: change-me-at-least-32-characters-long
+vault_seed_demo_password: change-me

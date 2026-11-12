@@ -1,0 +1,103 @@
+# Managed by Ansible (role: app_config). Local edits will be overwritten.
+# MediCloud on a single VM: the same hardened containers as the local stack, but the
+# backend and frontend images come from Amazon ECR (tag {{ deploy_image_tag }}).
+name: medicloud
+
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+
+  backend:
+    image: {{ ecr_registry }}/medicloud-backend:{{ deploy_image_tag }}
+    restart: unless-stopped
+    # Migrations + demo seed run under a PostgreSQL advisory lock before the API starts.
+    # (A separate one-shot "migrate" service would be restarted by every `compose up`,
+    # which would make the Ansible run report a change every time.)
+    command:
+      - sh
+      - -c
+      - python -m app.db.prestart && exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips '*' --no-server-header
+    environment:
+      APP_ENV: production
+      LOG_LEVEL: INFO
+      ENABLE_DOCS: "true"
+      HOSPITAL_TIMEZONE: {{ host_timezone }}
+      CURRENCY: INR
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?missing}
+      SEED_DEMO_DATA: "true"
+      SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2).status == 200 else 1)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 180s # first boot migrates and seeds the database
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+    <<: *hardening
+
+  frontend:
+    image: {{ ecr_registry }}/medicloud-frontend:{{ deploy_image_tag }}
+    restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "{{ medicloud_http_port }}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /etc/nginx/conf.d:uid=101,gid=101
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+    <<: *hardening
+
+volumes:
+  pgdata:
+    name: medicloud-pgdata
