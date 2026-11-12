@@ -148,7 +148,7 @@ A phase is "done" only when its exit criteria have actually been run and have pa
 **What I'll need:** Docker Desktop running (the Ansible control node is a container), and
 approval for a session's AWS environment plus a t3.micro instance ($0.0132/h).
 
-## Phase 7 — CI/CD 🟡 (written and dry-run locally; needs the GitHub repo)
+## Phase 7 — CI/CD 🟡 (CI green on GitHub; CD to be verified in an AWS session)
 
 **Deliverables:**
 

@@ -965,9 +965,8 @@ behave identically.
 
 ## 12. CI/CD (GitHub Actions)
 
-> **Status (Phase 7):** `ci.yml` and `cd.yml` are written and actionlint-clean, and every
-> check they run passes locally with the same tools and versions. Running them on GitHub
-> needs the repository.
+> **Status (Phase 7):** CI runs green on GitHub (all 6 jobs). CD is written and gated, and
+> is verified end to end in an AWS session.
 >
 > **Changes from the original design:**
 > - CD reads the environment values from the cluster that Ansible bootstrapped (D42).

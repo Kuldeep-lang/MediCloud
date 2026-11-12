@@ -9,7 +9,7 @@ section is added once its phase has been built and verified.
 | Kubernetes on minikube | ✅ Verified (Phase 4) | [§2](#2-kubernetes-minikube) |
 | AWS: EKS + RDS via Terraform | ✅ Verified on AWS (Phase 5) | [§3](#3-aws-terraform--eks) |
 | Ansible: EC2 server + EKS bootstrap | ✅ Verified (Phase 6) | [§4](#4-configuration-management-ansible) |
-| CI/CD: GitHub Actions | 🟡 Written and dry-run locally; runs once the repo is on GitHub (Phase 7) | [§5](#5-cicd-github-actions) |
+| CI/CD: GitHub Actions | ✅ CI green on GitHub · 🟡 CD verified in the next AWS session (Phase 7) | [§5](#5-cicd-github-actions) |
 | Monitoring: Prometheus + Grafana on EKS | ✅ Verified (Phase 8) | [§6](#6-monitoring-prometheus--grafana-on-eks) |
 
 For local development with hot reload (uvicorn + Vite), see the [README](../README.md).
@@ -579,8 +579,17 @@ No AWS keys are stored in GitHub, and no secret values appear in the workflow fi
 
 ### 5.3 Verification so far
 
-The workflows haven't run on GitHub yet; that needs the repository. Every check they run
-was dry-run locally with the same tools and versions:
+**CI on GitHub** ([Kuldeep-lang/MediCloud](https://github.com/Kuldeep-lang/MediCloud/actions)):
+
+| Run | Result |
+|---|---|
+| First push (`767faac`) | 5 of 6 jobs green. The IaC job failed at shellcheck: the runner's shellcheck 0.9.0 reported two findings that 0.11.0 locally did not. |
+| Fix (`0dfd247`) | ✅ **all 6 jobs green**: backend, frontend, IaC, secret scan, both images. The two findings were fixed, and CI now runs a digest-pinned shellcheck 0.11.0 so local and CI results match. |
+
+The CD run triggered by CI was **skipped**, as designed, because `DEPLOY_ENABLED` isn't set
+while no AWS environment exists. CD gets verified end to end in the next AWS session.
+
+Before the first push, every check was also dry-run locally with the same tools:
 
 | Step | Local result |
 |---|---|

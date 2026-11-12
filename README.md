@@ -29,7 +29,7 @@ cloud and DevOps lifecycle:
 | 4 | Kubernetes (minikube) | ✅ Done |
 | 5 | Terraform on AWS (VPC, EKS, ECR, RDS, IAM) | ✅ Applied and verified on AWS |
 | 6 | Ansible (EC2 server + EKS bootstrap) | ✅ Verified, idempotent |
-| 7 | CI/CD (GitHub Actions) | 🟡 Written and dry-run locally; runs once pushed to GitHub |
+| 7 | CI/CD (GitHub Actions) | ✅ CI green on GitHub · 🟡 CD ready, verified in the next AWS session |
 | 8 | Monitoring (Prometheus, Grafana on EKS) | ✅ Verified, incl. an outage experiment |
 | 9 | Final integration and demo guide | 🟡 Docs done; final end-to-end run with CI/CD pending |
 
