@@ -1,0 +1,32 @@
+[project]
+name = "medicloud-backend"
+version = "1.0.0"
+description = "MediCloud hospital management API (FastAPI)"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM", "C4"]
+ignore = [
+    "B008",   # FastAPI uses function calls (Depends/Query) in defaults by design
+    "S311",   # 'random' is fine for synthetic seed data (not cryptographic)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]  # asserts and literal test passwords are expected in tests
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = ["error::DeprecationWarning:app.*"]
+
+[tool.coverage.run]
+source = ["app"]
+omit = ["app/db/seed.py"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["alembic"]  # the local alembic/ folder must not be mistaken for first-party

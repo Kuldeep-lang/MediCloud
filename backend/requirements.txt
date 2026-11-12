@@ -1,0 +1,14 @@
+# Runtime dependencies (pinned; resolved and verified 2026-11-12)
+fastapi==0.162.4
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.1.8
+alembic==1.20.1
+psycopg[binary]==3.3.8
+pydantic==2.14.3
+pydantic-settings==2.16.2
+email-validator==2.3.0
+PyJWT==2.15.1
+pwdlib[argon2]==0.3.1
+prometheus-client==0.26.0
+Faker==40.54.0
+tzdata==2026.6
