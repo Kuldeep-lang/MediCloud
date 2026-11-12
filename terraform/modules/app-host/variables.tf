@@ -57,8 +57,14 @@ variable "http_ingress_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
+variable "enable_metrics_ingress" {
+  description = "Allow metrics_source_security_group_id to scrape node_exporter on 9100."
+  type        = bool
+  default     = false
+}
+
 variable "metrics_source_security_group_id" {
-  description = "Security group (the EKS cluster SG) allowed to scrape node_exporter on 9100. Empty disables the rule."
+  description = "Security group (the EKS cluster SG) allowed to scrape node_exporter when enable_metrics_ingress is true."
   type        = string
   default     = ""
 }

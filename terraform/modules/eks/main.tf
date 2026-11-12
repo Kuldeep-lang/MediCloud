@@ -197,8 +197,10 @@ resource "aws_eks_addon" "metrics_server" {
 }
 
 # ---------------------------------------------------------------- CI/CD access (namespaced)
+# count uses enable_deploy_access (known at plan time): the role ARN itself is unknown until
+# the role is created in the same apply, which Terraform rejects as a count argument.
 resource "aws_eks_access_entry" "deploy" {
-  count = var.deploy_role_arn == null ? 0 : 1
+  count = var.enable_deploy_access ? 1 : 0
 
   cluster_name  = aws_eks_cluster.this.name
   principal_arn = var.deploy_role_arn
@@ -206,7 +208,7 @@ resource "aws_eks_access_entry" "deploy" {
 }
 
 resource "aws_eks_access_policy_association" "deploy_edit_app" {
-  count = var.deploy_role_arn == null ? 0 : 1
+  count = var.enable_deploy_access ? 1 : 0
 
   cluster_name  = aws_eks_cluster.this.name
   principal_arn = var.deploy_role_arn
@@ -222,7 +224,7 @@ resource "aws_eks_access_policy_association" "deploy_edit_app" {
 
 # Read-only view of the ingress controller namespace (CD reads the load balancer hostname).
 resource "aws_eks_access_policy_association" "deploy_view_ingress" {
-  count = var.deploy_role_arn == null ? 0 : 1
+  count = var.enable_deploy_access ? 1 : 0
 
   cluster_name  = aws_eks_cluster.this.name
   principal_arn = var.deploy_role_arn

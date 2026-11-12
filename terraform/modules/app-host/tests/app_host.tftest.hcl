@@ -65,11 +65,25 @@ run "least_privilege_network_and_iam" {
   }
   assert {
     condition     = length(aws_vpc_security_group_ingress_rule.node_exporter) == 0
-    error_message = "node_exporter must stay closed unless a scraper security group is given."
+    error_message = "node_exporter must stay closed unless metrics ingress is enabled."
   }
   assert {
     condition     = endswith(aws_iam_role_policy_attachment.ecr_pull.policy_arn, "policy/AmazonEC2ContainerRegistryPullOnly")
     error_message = "The instance role may only pull from ECR."
+  }
+}
+
+run "metrics_open_only_to_the_scraper" {
+  command = plan
+
+  variables {
+    enable_metrics_ingress           = true
+    metrics_source_security_group_id = "sg-cluster"
+  }
+
+  assert {
+    condition     = aws_vpc_security_group_ingress_rule.node_exporter[0].referenced_security_group_id == "sg-cluster" && aws_vpc_security_group_ingress_rule.node_exporter[0].from_port == 9100
+    error_message = "node_exporter (9100) may only be reachable from the scraper's security group."
   }
 }
 

@@ -58,8 +58,14 @@ variable "max_size" {
   type        = number
 }
 
+variable "enable_deploy_access" {
+  description = "Grant the CI/CD role namespace-scoped cluster access (requires deploy_role_arn)."
+  type        = bool
+  default     = false
+}
+
 variable "deploy_role_arn" {
-  description = "CI/CD role granted namespace-scoped access (null = none)."
+  description = "CI/CD role granted namespace-scoped access when enable_deploy_access is true."
   type        = string
   default     = null
 }

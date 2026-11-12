@@ -58,6 +58,8 @@ module "eks" {
   min_size            = var.node_min_size
   max_size            = var.node_max_size
   deploy_role_arn     = module.iam.github_deploy_role_arn
+  # known at plan time, unlike the role ARN
+  enable_deploy_access = var.github_repository != ""
 
   # Policies must be attached before the cluster/nodes use the roles.
   cluster_role_dependencies = module.iam.cluster_role_policy_attachments
@@ -98,6 +100,7 @@ module "app_host" {
   instance_type                    = var.app_host_instance_type
   ssh_public_key                   = var.app_host_ssh_public_key
   ssh_ingress_cidrs                = var.app_host_ssh_cidrs
+  enable_metrics_ingress           = true
   metrics_source_security_group_id = module.eks.cluster_security_group_id
 }
 

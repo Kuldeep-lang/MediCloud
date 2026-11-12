@@ -16,19 +16,20 @@ mock_provider "aws" {
 }
 
 variables {
-  name                = "test"
-  kubernetes_version  = "1.37"
-  cluster_role_arn    = "arn:aws:iam::123456789012:role/test-eks-cluster"
-  node_role_arn       = "arn:aws:iam::123456789012:role/test-eks-node"
-  subnet_ids          = ["subnet-aaa", "subnet-bbb"]
-  public_access_cidrs = ["203.0.113.10/32"]
-  cluster_log_types   = ["audit", "authenticator"]
-  instance_types      = ["t3.medium"]
-  capacity_type       = "ON_DEMAND"
-  desired_size        = 2
-  min_size            = 1
-  max_size            = 3
-  deploy_role_arn     = "arn:aws:iam::123456789012:role/test-github-deploy"
+  name                 = "test"
+  kubernetes_version   = "1.37"
+  cluster_role_arn     = "arn:aws:iam::123456789012:role/test-eks-cluster"
+  node_role_arn        = "arn:aws:iam::123456789012:role/test-eks-node"
+  subnet_ids           = ["subnet-aaa", "subnet-bbb"]
+  public_access_cidrs  = ["203.0.113.10/32"]
+  cluster_log_types    = ["audit", "authenticator"]
+  instance_types       = ["t3.medium"]
+  capacity_type        = "ON_DEMAND"
+  desired_size         = 2
+  min_size             = 1
+  max_size             = 3
+  deploy_role_arn      = "arn:aws:iam::123456789012:role/test-github-deploy"
+  enable_deploy_access = true
 }
 
 run "cluster_security_and_cost_guards" {
@@ -101,7 +102,8 @@ run "ci_role_is_namespace_scoped" {
 run "no_ci_access_without_role" {
   command = plan
   variables {
-    deploy_role_arn = null
+    enable_deploy_access = false
+    deploy_role_arn      = null
   }
 
   assert {

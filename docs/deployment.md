@@ -351,7 +351,8 @@ AWS account · ap-southeast-2 (Sydney)
 | `modules/eks` | Cluster, node group, add-ons, access entries | 4 |
 | `modules/ecr` | Repositories + lifecycle | 1 |
 | `modules/rds` | PostgreSQL instance, parameter group | 3 |
-| `modules/app-host` | Ansible-managed EC2 VM, its security group and role | 3 |
+| `modules/app-host` | Ansible-managed EC2 VM, its security group and role | 4 |
+| root `tests/stack.tftest.hcl` | Plans the whole stack from scratch with every option on | 2 |
 | `bootstrap/` | Optional S3 bucket for remote state | — |
 
 ### 3.2 Cost
@@ -446,7 +447,7 @@ it and Terraform doesn't know about it. The teardown script removes it first.
 
 | Check | Result |
 |---|---|
-| Offline: `terraform validate`, 19 mock-provider tests (7 modules), TFLint, Trivy config | ✅ all pass. Trivy: 142 passed, 0 failed, accepted findings justified in code. |
+| Offline: `terraform validate`, 22 mock-provider tests (7 modules + a whole-stack plan), TFLint, Trivy config | ✅ all pass. Trivy: 142 passed, 0 failed, accepted findings justified in code. |
 | `terraform apply` (49 resources) | ✅ after one fix. The first apply created everything except RDS (`FreeTierRestrictionError` on 7-day backups). Retention was set to 1 and the re-apply created only the database. |
 | `terraform plan` afterwards | ✅ "No changes", so there is no drift. |
 | App on EKS (`eks-deploy.sh`) | ✅ 2 backend + 2 frontend pods Ready, 0 restarts. Images were pushed to ECR with an immutable tag. |
@@ -462,6 +463,7 @@ it and Terraform doesn't know about it. The teardown script removes it first.
 ```bash
 cd terraform
 terraform fmt -recursive -check && terraform init -backend=false && terraform validate
+terraform test                                    # whole-stack plan (mock AWS)
 for m in modules/*/; do terraform -chdir="$m" init && terraform -chdir="$m" test; done
 tflint --init && tflint --recursive --config "$PWD/.tflint.hcl"
 ```

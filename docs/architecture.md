@@ -818,7 +818,8 @@ local command while avoiding a second copy of every manifest.
 ## 10. AWS infrastructure (Terraform)
 
 > **Status (Phase 5): applied and verified on AWS (2026-11-12/13).**
-> - **Offline:** `terraform validate`, 19 mock-provider tests across 7 modules, TFLint, and
+> - **Offline:** `terraform validate`, 22 mock-provider tests (7 modules plus a whole-stack
+>   plan), TFLint, and
 >   Trivy (142 passed, 0 failed) are all clean.
 > - **On AWS:** 49 resources (+11 for the EC2 app server). The app runs on EKS against RDS
 >   over TLS 1.3, and `terraform plan` shows no drift.
@@ -1164,6 +1165,7 @@ The Helm chart is noted as the production upgrade path.
 | D45 | Monitoring deployed by Ansible from `monitoring/k8s` (Kustomize generates the ConfigMaps from the single config files). The EC2 node_exporter is a `file_sd` target written by Ansible. cAdvisor is scraped through the API server proxy. Grafana defaults to the light theme the palette was validated on. | Helm (kube-prometheus-stack); EC2 service discovery (needs AWS credentials in the pod) | Explainable, small, no extra IAM for pods. Config changes roll the pods through Kustomize's hash suffixes. |
 | D46 | CI pins every third-party action by commit SHA, runs Trivy from a digest-pinned image and scans history with gitleaks | Version tags; `aquasecurity/trivy-action` | CVE-2026-33634 showed that mutable tags can be repointed to malicious code. |
 | D47 | Outage experiments end existing DB sessions as well as applying a NetworkPolicy | NetworkPolicy alone | The VPC CNI policy agent blocks only new connections, so pooled connections kept working and the first attempt produced no outage. |
+| D48 | Optional resources take their `count` from plan-time booleans (`enable_deploy_access`, `enable_metrics_ingress`), and a root-level `terraform test` plans the whole stack from scratch | `count` derived from another resource's ARN or ID | Found before the next session by a read-only plan: an ID created in the same apply is unknown at plan time, so Terraform rejects it as `count` ("Invalid count argument"). It had only worked when the cluster already existed. Module tests can't see this; the whole-stack test fails on it and now runs in CI. |
 
 ---
 

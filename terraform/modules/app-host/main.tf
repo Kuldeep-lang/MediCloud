@@ -59,7 +59,9 @@ resource "aws_vpc_security_group_ingress_rule" "http" {
 }
 
 resource "aws_vpc_security_group_ingress_rule" "node_exporter" {
-  count = var.metrics_source_security_group_id == "" ? 0 : 1
+  # A plan-time boolean: the cluster SG id is unknown until the cluster exists, and an
+  # unknown value cannot decide count when everything is created in one apply.
+  count = var.enable_metrics_ingress ? 1 : 0
 
   security_group_id            = aws_security_group.host.id
   description                  = "Prometheus in EKS scrapes node_exporter"
