@@ -1,0 +1,67 @@
+# Alert and recording rules for MediCloud. Visible under Status -> Rules / Alerts in the
+# Prometheus UI (no Alertmanager in this academic setup; see docs/architecture.md §13).
+groups:
+  - name: medicloud.recording
+    rules:
+      - record: medicloud:http_requests:rate5m
+        expr: sum(rate(http_requests_total[5m]))
+      # "or vector(0)": pods that never returned a 5xx have no 5xx series at all, which
+      # would otherwise make the ratio empty ("No data") instead of 0% on a healthy system.
+      - record: medicloud:http_errors:ratio5m
+        expr: >-
+          (sum(rate(http_requests_total{status=~"5.."}[5m])) or vector(0))
+          / clamp_min(sum(rate(http_requests_total[5m])), 1e-9)
+      - record: medicloud:http_latency:p95_5m
+        expr: histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket[5m])))
+
+  - name: medicloud.alerts
+    rules:
+      - alert: BackendDown
+        expr: sum(up{job="medicloud-backend"}) < 1 or absent(up{job="medicloud-backend"})
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: No MediCloud API pod is being scraped successfully
+          description: Prometheus cannot reach any backend pod's /metrics endpoint.
+
+      - alert: HighErrorRate
+        expr: medicloud:http_errors:ratio5m > 0.05 and medicloud:http_requests:rate5m > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: More than 5% of API requests are failing (HTTP 5xx)
+          description: "5xx ratio over 5 minutes is {{ $value | humanizePercentage }}."
+
+      - alert: HighLatencyP95
+        expr: medicloud:http_latency:p95_5m > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: API p95 latency is above 1 second
+          description: "p95 over 5 minutes is {{ $value | humanizeDuration }}."
+
+      - alert: PodRestartLoop
+        expr: increase(kube_pod_container_status_restarts_total{namespace="medicloud"}[15m]) > 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pod {{ $labels.pod }} restarted more than 3 times in 15 minutes"
+
+      - alert: DatabaseDown
+        expr: max(medicloud_db_up) == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: The API cannot reach PostgreSQL (Amazon RDS)
+
+      - alert: AppHostDown
+        expr: up{job="app-host-node"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: The Ansible-managed EC2 app server is not reporting metrics

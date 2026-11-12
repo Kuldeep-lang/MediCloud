@@ -1,0 +1,40 @@
+# Monitoring stack for EKS: Prometheus + kube-state-metrics + Grafana (hand-written
+# manifests, decision D9). Config files live once under monitoring/ and are turned into
+# ConfigMaps here; the hash suffix makes pods restart when a config file changes.
+#
+#   kubectl kustomize --load-restrictor LoadRestrictionsNone monitoring/k8s | kubectl apply -f -
+#   (ansible/run.sh playbook.yml --tags k8s does this, plus the grafana-admin Secret and
+#    the EC2 scrape target)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: medicloud-monitoring
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: medicloud
+    includeSelectors: false
+
+resources:
+  - 00-namespace.yaml
+  - prometheus.yaml
+  - kube-state-metrics.yaml
+  - grafana.yaml
+  - policies.yaml
+
+configMapGenerator:
+  - name: prometheus-config
+    files:
+      - prometheus.yml=../prometheus/prometheus-k8s.yml
+  - name: prometheus-rules
+    files:
+      - medicloud.rules.yml=../prometheus/rules/medicloud.rules.yml
+  - name: grafana-datasources
+    files:
+      - prometheus.yml=../grafana/provisioning/datasources/prometheus.yml
+  - name: grafana-dashboard-provider
+    files:
+      - medicloud.yml=../grafana/provisioning/dashboards/medicloud.yml
+  - name: grafana-dashboards
+    files:
+      - medicloud-overview.json=../grafana/dashboards/medicloud-overview.json

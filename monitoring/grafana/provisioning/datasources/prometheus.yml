@@ -1,0 +1,12 @@
+# Grafana datasource, provisioned from file (nothing is configured by hand).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus.medicloud-monitoring.svc:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: 15s
