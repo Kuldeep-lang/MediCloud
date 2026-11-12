@@ -1,0 +1,158 @@
+# MediCloud - local stack.   Usage:  docker compose up --build
+#
+#   postgres  -> PostgreSQL 17 with a persistent named volume (internal only)
+#   migrate   -> one-shot: waits for the DB, runs Alembic migrations + demo seed, exits
+#   backend   -> FastAPI (internal only; reached through the frontend's /api proxy)
+#   frontend  -> nginx serving the React app on http://localhost:8080 and proxying /api
+#
+# Start-up order is enforced with health checks:
+#   postgres healthy -> migrate completed -> backend healthy -> frontend
+# Secrets come from .env (copy .env.example). Monitoring services arrive in Phase 8.
+
+name: medicloud
+
+x-backend-environment: &backend-environment
+  APP_ENV: ${APP_ENV:-development}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  ENABLE_DOCS: ${ENABLE_DOCS:-true}
+  HOSPITAL_TIMEZONE: ${HOSPITAL_TIMEZONE:-Asia/Kolkata}
+  CURRENCY: ${CURRENCY:-INR}
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: ${POSTGRES_DB:-medicloud}
+  POSTGRES_USER: ${POSTGRES_USER:-medicloud}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example to .env)}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env (copy .env.example to .env)}
+  JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+  ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+  CORS_ORIGINS: ${CORS_ORIGINS:-}
+  SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+  SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD:-}
+
+x-backend-build: &backend-build
+  context: ./backend
+  args:
+    APP_VERSION: ${APP_VERSION:-1.0.0}
+    GIT_COMMIT: ${GIT_COMMIT:-local}
+
+# Hardening applied to every service.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-medicloud}
+      POSTGRES_USER: ${POSTGRES_USER:-medicloud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env (copy .env.example to .env)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks:
+      - medicloud-net
+    security_opt:
+      - no-new-privileges:true
+    # The postgres entrypoint needs to switch from root to the postgres user,
+    # so it keeps only the capabilities required for that.
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1g
+
+  migrate:
+    build: *backend-build
+    image: medicloud-backend:local
+    command: ["python", "-m", "app.db.prestart"]
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    read_only: true
+    networks:
+      - medicloud-net
+    <<: *hardening
+
+  backend:
+    build: *backend-build
+    image: medicloud-backend:local
+    restart: unless-stopped
+    environment: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # No published port: like the Kubernetes Ingress, the frontend is the only way in.
+    # Debug directly with:  docker compose exec backend python -c "..."
+    expose:
+      - "8000"
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - medicloud-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512m
+    <<: *hardening
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        APP_VERSION: ${APP_VERSION:-1.0.0}
+        GIT_COMMIT: ${GIT_COMMIT:-local}
+    image: medicloud-frontend:local
+    restart: unless-stopped
+    environment:
+      BACKEND_UPSTREAM: http://backend:8000
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      # Bound to localhost only. Use "${FRONTEND_PORT:-8080}:8080" to expose on the LAN.
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/cache/nginx
+      - /etc/nginx/conf.d:uid=101,gid=101
+    networks:
+      - medicloud-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128m
+    <<: *hardening
+
+networks:
+  medicloud-net:
+    name: medicloud-net
+    driver: bridge
+
+volumes:
+  pgdata:
+    name: medicloud-pgdata
