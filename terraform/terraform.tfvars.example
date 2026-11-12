@@ -1,0 +1,29 @@
+# Copy to terraform.tfvars (git-ignored) and adjust. Every value here has a safe default;
+# only set what you want to change.
+
+project_name = "medicloud"
+environment  = "demo"
+aws_region   = "ap-southeast-2"
+
+# Kubernetes version - must be in EKS STANDARD support (check: aws eks describe-cluster-versions)
+kubernetes_version = "1.37"
+
+# Restrict the public API endpoint to your own IP for extra safety (IAM auth is always required).
+# Note: GitHub-hosted runners then cannot deploy - see variables.tf.
+# cluster_endpoint_public_access_cidrs = ["203.0.113.10/32"]
+
+# Worker nodes. Free-plan accounts may only launch Free-plan-eligible types, hence
+# c7i-flex.large; on a Paid plan, t3.medium is cheaper. SPOT is cheaper but reclaimable.
+node_instance_types = ["c7i-flex.large"]
+node_capacity_type  = "ON_DEMAND"
+node_desired_size   = 2
+
+# Database
+db_instance_class = "db.t4g.micro"
+
+# CI/CD: enable the GitHub OIDC deploy role for your repository (Phase 7).
+# github_repository = "your-github-user/medicloud"
+
+# Cost guardrail: an AWS Budget e-mails you at 25%, 50%, 100% of this amount.
+# budget_alert_email = "you@example.com"
+monthly_budget_usd = 20

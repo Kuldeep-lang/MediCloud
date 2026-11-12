@@ -1,0 +1,22 @@
+# Remote state in S3 with S3-native locking (Terraform >= 1.10).
+#
+# 1. Create the bucket once:   cd terraform/bootstrap && terraform init && terraform apply
+# 2. Copy this file:           cp backend.tf.example backend.tf   (backend.tf is git-ignored)
+# 3. Put the bucket name from the bootstrap output below, then:  terraform init
+#
+# Why S3 + lockfile: state is shared (laptop and CI see the same infrastructure), versioned
+# (recoverable), encrypted, and `use_lockfile` writes a .tflock object so two runs can never
+# modify the infrastructure at the same time. (DynamoDB-based locking is deprecated.)
+#
+# Without backend.tf, Terraform keeps state locally in terraform.tfstate (also git-ignored),
+# which is fine for a single-person demo.
+
+terraform {
+  backend "s3" {
+    bucket       = "medicloud-tfstate-ACCOUNT_ID"
+    key          = "medicloud/terraform.tfstate"
+    region       = "ap-southeast-2"
+    encrypt      = true
+    use_lockfile = true
+  }
+}
