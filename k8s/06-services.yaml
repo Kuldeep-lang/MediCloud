@@ -1,0 +1,35 @@
+# Internal ClusterIP Services: stable DNS names + load balancing across ready pods.
+#   backend.medicloud.svc.cluster.local:8000   frontend.medicloud.svc.cluster.local:8080
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: medicloud
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/name: frontend
+    app.kubernetes.io/part-of: medicloud
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

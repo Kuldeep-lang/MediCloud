@@ -1,0 +1,45 @@
+# EKS overlay: reuses the base manifests in k8s/ unchanged and only patches what differs.
+#
+#   Render:  kubectl kustomize --load-restrictor LoadRestrictionsNone k8s/overlays/eks
+#   Deploy:  ... | kubectl apply -f -          (the CD pipeline does this - Phase 7)
+#
+# Differences from the local cluster:
+#   * images come from Amazon ECR, tagged with the git commit SHA
+#   * the in-cluster PostgreSQL is left out - the app uses Amazon RDS (TLS required)
+#   * the Namespace is left out - it is created once by an admin/Ansible, so the CD role
+#     only needs namespace-scoped permissions
+#   * the Secret is left out - CD builds it from AWS Secrets Manager
+#   * the Ingress host becomes the public hostname
+#
+# Placeholders replaced by the CD pipeline before rendering:
+#   ACCOUNT_ID, IMAGE_TAG, RDS_ENDPOINT, INGRESS_HOST
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: medicloud
+
+resources:
+  - ../../02-configmap.yaml
+  - ../../04-backend-deployment.yaml
+  - ../../05-frontend-deployment.yaml
+  - ../../06-services.yaml
+  - ../../07-ingress.yaml
+  - ../../08-hpa.yaml
+  - ../../09-policies.yaml
+
+images:
+  - name: medicloud-backend
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-2.amazonaws.com/medicloud-backend
+    newTag: IMAGE_TAG
+  - name: medicloud-frontend
+    newName: ACCOUNT_ID.dkr.ecr.ap-southeast-2.amazonaws.com/medicloud-frontend
+    newTag: IMAGE_TAG
+
+patches:
+  - path: configmap-rds.yaml
+  - target:
+      kind: Ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: INGRESS_HOST

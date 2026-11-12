@@ -1,0 +1,101 @@
+# Ingress for the F5 NGINX Ingress Controller (install: kubectl apply -k k8s/ingress-controller).
+#
+# "Mergeable" Ingresses: one master (host-level settings) plus minions (paths), so each
+# path group can carry its own rate limit.
+#   /                    -> frontend   (SPA)
+#   /api                 -> backend    (20 req/s per client IP, burst 40)
+#   /api/v1/auth/login   -> backend    (5 req/min per client IP, burst 5: brute-force guard)
+# /metrics and /health are NOT routed: they stay internal to the cluster.
+#
+# Host: browsers resolve *.localhost to 127.0.0.1 automatically - no hosts-file edits.
+# The EKS overlay replaces it with the real hostname.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: medicloud
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+  annotations:
+    nginx.org/mergeable-ingress-type: master
+    nginx.org/client-max-body-size: "2m"
+    nginx.org/proxy-connect-timeout: "5s"
+    nginx.org/proxy-read-timeout: "60s"
+    nginx.org/server-tokens: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: medicloud.localhost
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: medicloud-web
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: medicloud.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: frontend
+                port: { name: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: medicloud-api
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+    nginx.org/limit-req-rate: "20r/s"
+    nginx.org/limit-req-burst: "40"
+    nginx.org/limit-req-no-delay: "true"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: medicloud.localhost
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: backend
+                port: { name: http }
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: medicloud-login
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+  annotations:
+    nginx.org/mergeable-ingress-type: minion
+    nginx.org/limit-req-rate: "5r/m"
+    nginx.org/limit-req-burst: "5"
+    nginx.org/limit-req-no-delay: "true"
+    nginx.org/limit-req-reject-code: "429"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: medicloud.localhost
+      http:
+        paths:
+          - path: /api/v1/auth/login
+            pathType: Exact
+            backend:
+              service:
+                name: backend
+                port: { name: http }

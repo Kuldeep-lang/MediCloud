@@ -1,0 +1,26 @@
+# Chaos experiment: cut the API off from its database (Amazon RDS or the in-cluster
+# PostgreSQL) to watch monitoring react. Allows DNS only; all other egress is dropped.
+#
+#   kubectl apply  -f k8s/tools/chaos-block-database.yaml   # outage starts
+#   kubectl delete -f k8s/tools/chaos-block-database.yaml   # outage ends
+#
+# Expected: requests needing the DB fail fast (500, within ~7 s thanks to the connect /
+# TCP timeouts), readiness fails so pods leave the Service, medicloud_db_up drops to 0
+# and the DatabaseDown alert fires after 1 minute; liveness keeps passing, so no restarts.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: chaos-block-database
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+    medicloud/purpose: chaos-experiment
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  policyTypes: ["Egress"]
+  egress:
+    - ports:
+        - { port: 53, protocol: UDP }
+        - { port: 53, protocol: TCP }

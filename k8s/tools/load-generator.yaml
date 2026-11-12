@@ -1,0 +1,74 @@
+# Load generator for the HPA demo - NOT applied by `kubectl apply -f k8s/` (sub-folder).
+#   Start:  kubectl apply -f k8s/tools/load-generator.yaml
+#   Watch:  kubectl get hpa backend -n medicloud --watch
+#   Stop:   kubectl delete -f k8s/tools/load-generator.yaml
+#
+# Each pod runs several parallel loops calling the backend Service directly (inside the
+# cluster, bypassing the Ingress rate limits). It hits /health/ready (a DB round trip) and
+# /api/v1/system/info - CPU work for the API without touching memory-hard password hashing.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: load-generator
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/name: load-generator
+    app.kubernetes.io/part-of: medicloud
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: load-generator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: load-generator
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: load
+          image: busybox:1.37
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Generating load against http://backend:8000 ..."
+              for worker in 1 2 3 4 5 6; do
+                ( while true; do
+                    wget -q -O /dev/null http://backend:8000/health/ready
+                    wget -q -O /dev/null http://backend:8000/api/v1/system/info
+                  done ) &
+              done
+              wait
+          resources:
+            requests: { cpu: 50m, memory: 16Mi }
+            limits: { cpu: 300m, memory: 64Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+# The namespace is default-deny: explicitly let the load generator reach the backend.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: backend-from-load-generator
+  namespace: medicloud
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  policyTypes: ["Ingress"]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: load-generator
+      ports:
+        - port: 8000

@@ -1,0 +1,10 @@
+# Point the API at Amazon RDS instead of the in-cluster PostgreSQL.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: medicloud-config
+  namespace: medicloud
+data:
+  POSTGRES_HOST: RDS_ENDPOINT
+  # RDS enforces TLS (rds.force_ssl=1 in the Terraform parameter group).
+  POSTGRES_SSLMODE: require

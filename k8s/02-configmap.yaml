@@ -1,0 +1,21 @@
+# Non-secret settings shared by the backend pods (secrets live in medicloud-secrets).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: medicloud-config
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+data:
+  # "production" makes the API refuse to start with a weak JWT_SECRET_KEY.
+  APP_ENV: production
+  LOG_LEVEL: INFO
+  ENABLE_DOCS: "true"
+  HOSPITAL_TIMEZONE: Asia/Kolkata
+  CURRENCY: INR
+  POSTGRES_HOST: postgres
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: medicloud
+  # Production traffic is same-origin through the Ingress, so no CORS origins are needed.
+  CORS_ORIGINS: ""
+  SEED_DEMO_DATA: "true"

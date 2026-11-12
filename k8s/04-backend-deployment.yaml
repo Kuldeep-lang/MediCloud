@@ -1,0 +1,127 @@
+# FastAPI backend: 2+ replicas (the HPA in 08-hpa.yaml scales 2..6 on CPU).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: backend
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: medicloud
+automountServiceAccountToken: false # the API never talks to Kubernetes
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: medicloud
+spec:
+  replicas: 2
+  revisionHistoryLimit: 5
+  # Zero-downtime rolling update: start one new pod, wait until it is Ready, then
+  # remove one old pod. Capacity never drops below the desired replica count.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: backend
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: medicloud
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: backend
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway # spread across nodes when there are several
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: backend
+      # Migrations + demo seed before the API starts. Both run inside a PostgreSQL
+      # advisory lock, so replicas starting together cannot race each other.
+      initContainers:
+        - name: migrate
+          image: medicloud-backend:local
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-m", "app.db.prestart"]
+          envFrom:
+            - configMapRef: { name: medicloud-config }
+            - secretRef: { name: medicloud-secrets }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext: &container-security
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      containers:
+        - name: backend
+          image: medicloud-backend:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          envFrom:
+            - configMapRef: { name: medicloud-config }
+            - secretRef: { name: medicloud-secrets }
+          # Startup: give a cold start time before liveness checks begin.
+          startupProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 2
+            failureThreshold: 30
+          # Liveness: is the process alive? Deliberately ignores the database - restarting
+          # every API pod during a DB outage would fix nothing and cause a restart storm.
+          livenessProbe:
+            httpGet: { path: /health/live, port: http }
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # Readiness: can it serve? Requires the DB; failing pods leave the Service
+          # endpoints and receive no traffic until they recover.
+          readinessProbe:
+            httpGet: { path: /health/ready, port: http }
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          # On shutdown, wait for endpoint removal to propagate before uvicorn stops,
+          # so no in-flight request hits a terminating pod during rolling updates.
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "5"]
+          resources:
+            requests: { cpu: 100m, memory: 192Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext: *container-security
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

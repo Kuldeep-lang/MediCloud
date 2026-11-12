@@ -1,0 +1,35 @@
+# F5 NGINX Ingress Controller (open source), pinned to v5.7.0 (released 2026-10-14).
+#   Used by:    k8s/ingress-controller (minikube, NodePort) and k8s/ingress-controller/eks (NLB)
+#   Install locally with:  kubectl apply -k k8s/ingress-controller
+#
+# Why F5's controller: the community kubernetes/ingress-nginx project was retired in
+# March 2026 and receives no security fixes; F5's controller is maintained and speaks
+# the same networking.k8s.io/v1 Ingress API (see docs/architecture.md section 9.6).
+#
+# Every upstream manifest is pinned to the exact release tag - never a branch.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deploy/crds.yaml
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deployments/common/ns-and-sa.yaml
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deployments/rbac/rbac.yaml
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deployments/common/nginx-config.yaml
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deployments/common/ingress-class.yaml
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deployments/deployment/nginx-ingress.yaml
+  - https://raw.githubusercontent.com/nginx/kubernetes-ingress/v5.7.0/deployments/service/nodeport.yaml
+
+patches:
+  # Expose controller metrics on :9113 for Prometheus (Phase 8).
+  - target:
+      kind: Deployment
+      name: nginx-ingress
+    patch: |-
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: -enable-prometheus-metrics
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          prometheus.io/scrape: "true"
+          prometheus.io/port: "9113"

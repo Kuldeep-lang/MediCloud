@@ -1,0 +1,15 @@
+# MediCloud namespace. Files are numbered because `kubectl apply -f k8s/` reads them in
+# lexical order and the namespace must exist first.
+#
+# Pod Security Admission "restricted": the API server REJECTS any pod that runs as root,
+# allows privilege escalation, keeps Linux capabilities or lacks a seccomp profile.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: medicloud
+  labels:
+    app.kubernetes.io/part-of: medicloud
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/audit: restricted

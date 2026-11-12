@@ -1,0 +1,38 @@
+# Scale the backend on CPU (needs metrics-server: `minikube addons enable metrics-server`;
+# an EKS add-on on AWS). Utilisation is measured against the pod's CPU *request* (100m),
+# so 70% means ~70m CPU per pod on average.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: backend
+  namespace: medicloud
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/part-of: medicloud
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: backend
+  minReplicas: 2
+  maxReplicas: 6
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleUp:
+      stabilizationWindowSeconds: 0 # react to load immediately
+      policies:
+        - type: Pods
+          value: 2
+          periodSeconds: 30
+    scaleDown:
+      stabilizationWindowSeconds: 120 # avoid flapping when load dips briefly
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60

@@ -1,0 +1,10 @@
+# Local (minikube) install of the F5 NGINX Ingress Controller: the pinned base as-is,
+# exposed through a NodePort Service (reach it with kubectl port-forward).
+#   Install:    kubectl apply -k k8s/ingress-controller
+#   Uninstall:  kubectl delete -k k8s/ingress-controller
+# On AWS use k8s/ingress-controller/eks instead (Network Load Balancer).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - base
