@@ -61,7 +61,8 @@ EOF
     run bash -euc 'ansible-playbook playbook.yml --syntax-check && ansible-lint'
     ;;
   inventory)
-    run ansible-inventory --graph --vars
+    # No --vars: it would print decrypted vault values (passwords, keys) to the screen.
+    run ansible-inventory --graph
     ;;
   "")
     sed -n '2,10p' "$0"

@@ -69,7 +69,7 @@ appointment, then Beds and Billing.
 **Show:** `terraform/` in the editor (modules), then:
 
 ```bash
-terraform -chdir=terraform state list | wc -l        # ~60 resources, all from code
+terraform -chdir=terraform state list | wc -l        # ~80 entries, all from code
 terraform -chdir=terraform plan                      # "No changes": no drift
 ```
 
