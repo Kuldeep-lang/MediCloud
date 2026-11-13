@@ -170,6 +170,30 @@ CloudWatch Logs and EC2. Creating IAM roles for EKS is admin-equivalent anyway, 
 project uses `AdministratorAccess` on the operator's own user. Check who you are with
 `aws sts get-caller-identity`.
 
+### CD: `Could not assume role with OIDC: Not authorized to perform sts:AssumeRoleWithWebIdentity`
+
+The token's subject doesn't match the deploy role's trust policy. Look up the subject GitHub
+actually sent:
+
+```bash
+aws cloudtrail lookup-events --lookup-attributes AttributeKey=EventName,AttributeValue=AssumeRoleWithWebIdentity   --max-results 1 --query "Events[0].CloudTrailEvent" --output text
+```
+
+- `userName` is `repo:<owner>@<id>/<repo>@<id>:environment:production`: the repository
+  uses immutable IDs. Set `github_owner_id` and `github_repository_id` in
+  `terraform/terraform.tfvars` (values from `https://api.github.com/repos/<owner>/<repo>`) and
+  apply. This is a free, in-place IAM update (D49).
+- The job has no `:environment:production`: the job isn't running in the `production`
+  Environment.
+- No CloudTrail event at all: check the `AWS_ROLE_ARN` secret.
+
+### CD job is skipped
+
+The repository variable must be named exactly `DEPLOY_ENABLED` with the value `true`, under
+**Settings → Secrets and variables → Actions → Variables → Repository variables** (not an
+Environment variable and not a Secret). After fixing it, use **Re-run all jobs** or
+**Run workflow**.
+
 ## Ansible
 
 ### Docker fails to start on the EC2 server: `no sockets found via socket activation`

@@ -39,6 +39,8 @@ module "iam" {
   db_secret_arn               = module.rds.master_user_secret_arn
   github_repository           = var.github_repository
   github_environment          = var.github_environment
+  github_owner_id             = var.github_owner_id
+  github_repository_id        = var.github_repository_id
   create_github_oidc_provider = var.create_github_oidc_provider
 }
 

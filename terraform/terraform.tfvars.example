@@ -23,6 +23,9 @@ db_instance_class = "db.t4g.micro"
 
 # CI/CD: enable the GitHub OIDC deploy role for your repository (Phase 7).
 # github_repository = "your-github-user/medicloud"
+# Only if CD fails with AssumeRoleWithWebIdentity and CloudTrail shows owner@id/repo@id:
+# github_owner_id      = "12345678"
+# github_repository_id = "123456789"
 
 # Cost guardrail: an AWS Budget e-mails you at 25%, 50%, 100% of this amount.
 # budget_alert_email = "you@example.com"

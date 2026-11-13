@@ -195,6 +195,28 @@ variable "github_repository" {
   }
 }
 
+variable "github_owner_id" {
+  description = "Numeric owner ID, for repositories whose OIDC subject uses immutable IDs (repo:owner@id/repo@id:...). Find it at https://api.github.com/repos/<owner>/<repo> (owner.id)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[0-9]*$", var.github_owner_id))
+    error_message = "github_owner_id is a number, e.g. 12345678."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Numeric repository ID (the top-level id at https://api.github.com/repos/<owner>/<repo>). Set together with github_owner_id."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[0-9]*$", var.github_repository_id))
+    error_message = "github_repository_id is a number, e.g. 123456789."
+  }
+}
+
 variable "github_environment" {
   description = "GitHub Environment the deploy job runs in (the role trusts only this environment)."
   type        = string

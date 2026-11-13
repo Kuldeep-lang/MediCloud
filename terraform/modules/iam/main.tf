@@ -16,6 +16,16 @@ locals {
   cluster_arn     = "arn:${local.partition}:eks:${data.aws_region.current.region}:${local.account_id}:cluster/${var.cluster_name}"
   enable_github   = var.github_repository != ""
   github_oidc_url = "token.actions.githubusercontent.com"
+
+  # GitHub's OIDC subject names the repository either as "owner/repo" or, for repositories
+  # that use immutable identifiers, as "owner@<owner id>/repo@<repo id>". The second form
+  # cannot be inherited by someone who later registers a deleted owner or repository name.
+  github_repo_parts = split("/", var.github_repository)
+  github_subject_repo = (
+    local.enable_github && var.github_owner_id != "" && var.github_repository_id != ""
+    ? "${local.github_repo_parts[0]}@${var.github_owner_id}/${local.github_repo_parts[1]}@${var.github_repository_id}"
+    : var.github_repository
+  )
 }
 
 # ---------------------------------------------------------------- EKS cluster role
@@ -107,7 +117,7 @@ data "aws_iam_policy_document" "github_assume" {
     condition {
       test     = "StringEquals"
       variable = "${local.github_oidc_url}:sub"
-      values   = ["repo:${var.github_repository}:environment:${var.github_environment}"]
+      values   = ["repo:${local.github_subject_repo}:environment:${var.github_environment}"]
     }
   }
 }

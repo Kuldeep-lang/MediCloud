@@ -71,6 +71,23 @@ run "github_role_trusts_one_repo_and_environment" {
   }
 }
 
+run "github_role_trusts_immutable_repository_ids" {
+  command = apply
+  variables {
+    github_owner_id      = "1111"
+    github_repository_id = "2222"
+  }
+
+  # GitHub sends "owner@id/repo@id" for repositories that use immutable identifiers.
+  assert {
+    condition = one([
+      for c in data.aws_iam_policy_document.github_assume[0].statement[0].condition :
+      c.values[0] if c.variable == "token.actions.githubusercontent.com:sub"
+    ]) == "repo:example-user@1111/medicloud@2222:environment:production"
+    error_message = "With IDs set, the subject must pin the owner and repository IDs exactly."
+  }
+}
+
 run "no_ci_iam_without_repository" {
   command = plan
   variables {

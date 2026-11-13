@@ -148,7 +148,7 @@ A phase is "done" only when its exit criteria have actually been run and have pa
 **What I'll need:** Docker Desktop running (the Ansible control node is a container), and
 approval for a session's AWS environment plus a t3.micro instance ($0.0132/h).
 
-## Phase 7 — CI/CD 🟡 (CI green on GitHub; CD to be verified in an AWS session)
+## Phase 7 — CI/CD ✅ (CI green on GitHub; CD verified on EKS on 2026-11-13)
 
 **Deliverables:**
 
@@ -182,11 +182,11 @@ approval for a session's AWS environment plus a t3.micro instance ($0.0132/h).
 - Alert rules load.
 - The error-rate panel reacts to induced 5xx errors.
 
-## Phase 9 — Final integration 🟡 (docs done; final run with CI/CD pending)
+## Phase 9 — Final integration ✅ (end-to-end run on 2026-11-13, deployment.md §5.3)
 
 **Deliverables:**
 
-- End-to-end run on AWS: provision → configure → CI/CD deploy → monitor → destroy
+- End-to-end run on AWS: provision → configure → CI/CD deploy → monitor → destroy ✅
 - Fixes for any integration issues found
 - `docs/deployment.md`, `docs/troubleshooting.md`, `docs/demo-guide.md` (a scripted
   15-minute demo with talking points) ✅

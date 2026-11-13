@@ -24,6 +24,28 @@ variable "github_repository" {
   default     = ""
 }
 
+variable "github_owner_id" {
+  description = "Numeric GitHub owner ID. Set with github_repository_id when the OIDC subject uses immutable IDs (owner@id/repo@id)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[0-9]*$", var.github_owner_id))
+    error_message = "github_owner_id is a number, e.g. 12345678."
+  }
+}
+
+variable "github_repository_id" {
+  description = "Numeric GitHub repository ID (see github_owner_id)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = can(regex("^[0-9]*$", var.github_repository_id))
+    error_message = "github_repository_id is a number, e.g. 123456789."
+  }
+}
+
 variable "github_environment" {
   description = "GitHub Environment the deploy job must run in."
   type        = string

@@ -966,8 +966,8 @@ behave identically.
 
 ## 12. CI/CD (GitHub Actions)
 
-> **Status (Phase 7):** CI runs green on GitHub (all 6 jobs). CD is written and gated, and
-> is verified end to end in an AWS session.
+> **Status (Phase 7):** ✅ CI runs green on GitHub (all 6 jobs). CD deployed commit
+> `1aadd8c` to EKS on 2026-11-13: OIDC login, approval gate, Trivy, push, rollout, smoke test.
 >
 > **Changes from the original design:**
 > - CD reads the environment values from the cluster that Ansible bootstrapped (D42).
@@ -1166,6 +1166,7 @@ The Helm chart is noted as the production upgrade path.
 | D46 | CI pins every third-party action by commit SHA, runs Trivy from a digest-pinned image and scans history with gitleaks | Version tags; `aquasecurity/trivy-action` | CVE-2026-33634 showed that mutable tags can be repointed to malicious code. |
 | D47 | Outage experiments end existing DB sessions as well as applying a NetworkPolicy | NetworkPolicy alone | The VPC CNI policy agent blocks only new connections, so pooled connections kept working and the first attempt produced no outage. |
 | D48 | Optional resources take their `count` from plan-time booleans (`enable_deploy_access`, `enable_metrics_ingress`), and a root-level `terraform test` plans the whole stack from scratch | `count` derived from another resource's ARN or ID | Found before the next session by a read-only plan: an ID created in the same apply is unknown at plan time, so Terraform rejects it as `count` ("Invalid count argument"). It had only worked when the cluster already existed. Module tests can't see this; the whole-stack test fails on it and now runs in CI. |
+| D49 | The OIDC trust can pin GitHub's immutable owner and repository IDs (`repo:owner@id/repo@id:environment:production`), still with `StringEquals` | A `StringLike` wildcard over the IDs | Found by the first CD run: this repository's tokens carry the ID form, so the name-only subject was refused. Exact IDs also stop anyone who later registers a deleted owner or repository name from inheriting the role. |
 
 ---
 

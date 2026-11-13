@@ -100,6 +100,7 @@ jobs:
             || { echo "::error::Run 'ansible/run.sh playbook.yml --tags k8s' once after terraform apply"; exit 1; }
 
       - name: Render the EKS overlay and apply
+        id: apply
         env:
           REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
@@ -130,8 +131,10 @@ jobs:
           echo "backend image: $running"
           [[ "$running" == *":$TAG" ]]
 
+      # Only after the cluster was changed; an earlier failure (login, build, scan) left the
+      # running version untouched, so there is nothing to undo.
       - name: Roll back on failure
-        if: failure()
+        if: failure() && steps.apply.outcome != 'skipped'
         run: |
           kubectl rollout undo deployment/backend -n medicloud || true
           kubectl rollout undo deployment/frontend -n medicloud || true

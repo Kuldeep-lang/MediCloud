@@ -566,6 +566,9 @@ the daemon, and recovers with a reset and retry if that fails (troubleshooting g
 
    ```hcl
    github_repository = "<owner>/<repo>"
+   # Only if the repository's OIDC subject uses immutable IDs (troubleshooting.md):
+   github_owner_id      = "<owner.id from https://api.github.com/repos/<owner>/<repo>>"
+   github_repository_id = "<id from the same URL>"
    ```
 
 3. In the repository settings:
@@ -593,8 +596,22 @@ pushed, its `docker push` is refused. In a session, deploy the first version wit
 | First push (`767faac`) | 5 of 6 jobs green. The IaC job failed at shellcheck: the runner's shellcheck 0.9.0 reported two findings that 0.11.0 locally did not. |
 | Fix (`0dfd247`) | ✅ **all 6 jobs green**: backend, frontend, IaC, secret scan, both images. The two findings were fixed, and CI now runs a digest-pinned shellcheck 0.11.0 so local and CI results match. |
 
-The CD run triggered by CI was **skipped**, as designed, because `DEPLOY_ENABLED` isn't set
-while no AWS environment exists. CD gets verified end to end in the next AWS session.
+Until the AWS session, CD runs were **skipped**, as designed, because `DEPLOY_ENABLED` was
+not set while no AWS environment existed.
+
+**End-to-end session, 2026-11-13** (provision → configure → CI/CD deploy → destroy):
+
+| Step | Result |
+|---|---|
+| `terraform apply` from nothing | ✅ **66 resources**, first from-scratch build since the D48 fix |
+| `eks-deploy.sh` (port-forward mode) | ✅ version `b39b40a42779` rolled out, smoke test 200 |
+| `ansible/run.sh playbook.yml` | ✅ failed=0 on both hosts. EC2 app, EKS bootstrap and monitoring health checks passed, demo login OK |
+| CI on `1aadd8c` | ✅ all 6 jobs |
+| CD attempt 1 | Skipped: the repository variable was misspelled (`DEPLOYED_ENABLED`) |
+| CD attempt 2 | ❌ `Not authorized to perform sts:AssumeRoleWithWebIdentity`. CloudTrail showed GitHub's subject uses immutable IDs (`repo:Kuldeep-lang@172027358/MediCloud@1455658118:…`). Fixed in the IAM module (D49): a 1-resource, in-place trust-policy update |
+| CD attempt 3 | ✅ approved in the `production` environment → OIDC → build → Trivy → push `1aadd8cf9ffa` → apply → rollout → smoke test |
+| Independent check | ✅ both deployments on `:1aadd8cf9ffa` (rollout revision 1 → 2), 4/4 pods Running, 0 restarts, `/api/v1/system/info` answers |
+| `aws-teardown.sh` | ✅ **66 destroyed**, leftovers check: nothing billable |
 
 Before the first push, every check was also dry-run locally with the same tools:
 
