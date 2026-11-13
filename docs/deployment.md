@@ -579,6 +579,11 @@ the daemon, and recovers with a reset and retry if that fails (troubleshooting g
 
 No AWS keys are stored in GitHub, and no secret values appear in the workflow files.
 
+**Run CD on a new commit.** ECR tags are immutable and both `eks-deploy.sh` and CD tag
+images with the short commit SHA. If CD runs on the commit that `eks-deploy.sh` already
+pushed, its `docker push` is refused. In a session, deploy the first version with
+`eks-deploy.sh`, then push the next commit and let CI → CD deliver it.
+
 ### 5.3 Verification so far
 
 **CI on GitHub** ([Kuldeep-lang/MediCloud](https://github.com/Kuldeep-lang/MediCloud/actions)):
